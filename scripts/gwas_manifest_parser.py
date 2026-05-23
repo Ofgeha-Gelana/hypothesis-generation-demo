@@ -265,7 +265,7 @@ class GWASManifestParser:
         
         return normalized
     
-    def _create_display_name(self, description: str) -> str:
+    def _create_display_name(self, description: str, phenotype_code: str = '') -> str:
         """
         Create a shorter display name from description
         

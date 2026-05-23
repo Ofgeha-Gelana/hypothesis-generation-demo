@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-from src.api import socketio  # noqa: F401 — registers @sio.on handlers
 from src.api.routes.analysis import router as analysis_router
 from src.api.routes.enrichment import router as enrichment_router
 from src.api.routes.files import router as files_router

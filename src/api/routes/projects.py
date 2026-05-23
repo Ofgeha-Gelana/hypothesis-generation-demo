@@ -7,7 +7,7 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from loguru import logger
 from werkzeug.utils import secure_filename
@@ -193,7 +193,22 @@ async def bulk_delete_projects(
 
 @router.post("/analysis-pipeline", status_code=202)
 async def post_analysis_pipeline(
-    request: Request,
+    project_name: str = Form(..., description="Project name"),
+    population: str = Form("EUR", description="Population: EUR, AFR, AMR, EAS, SAS"),
+    is_uploaded: bool = Form(False, description="True to upload a file; False to use GWAS library"),
+    gwas_file: str | None = Form(None, description="GWAS library file ID (when is_uploaded=False)"),
+    gwas_file_upload: UploadFile | None = File(None, description="GWAS file to upload (when is_uploaded=True)"),
+    phenotype: str | None = Form(None, description="Phenotype label (auto-inferred from library if omitted)"),
+    ref_genome: str | None = Form(None, description="Reference genome: GRCh37 or GRCh38 (default GRCh37)"),
+    maf_threshold: float = Form(0.01, description="Minor allele frequency threshold (0.001–0.5)"),
+    seed: int = Form(42, description="Random seed (1–999999)"),
+    window: int = Form(2000, description="Fine-mapping window in kb (≤10000)"),
+    L: int = Form(-1, description="Max causal signals; -1 = auto (1–50 or -1)"),
+    coverage: float = Form(0.95, description="Credible set coverage (0.5–0.999)"),
+    min_abs_corr: float = Form(0.5, description="Min absolute correlation (0.5–1.0)"),
+    batch_size: int = Form(5, description="Loci per batch (1–20)"),
+    max_workers: int = Form(3, description="Parallel workers (1–16)"),
+    sample_size: int = Form(10000, description="GWAS sample size"),
     current_user_id: str = Depends(get_current_user_id),
     projects: ProjectHandler = Depends(get_project_handler),
     files: FileHandler = Depends(get_file_handler),
@@ -202,39 +217,19 @@ async def post_analysis_pipeline(
     gwas_library: GWASLibraryHandler = Depends(get_gwas_library_handler),
 ):
     try:
-        form = await request.form()
-
-        project_name: str | None = form.get("project_name")
-        population: str = form.get("population", "EUR")
-        max_workers: int = int(form.get("max_workers", 3))
-        is_uploaded: bool = form.get("is_uploaded", "false").lower() == "true"
-
-        gwas_file = form.get("gwas_file") if is_uploaded else None
-
-        maf_threshold: float = float(form.get("maf_threshold", 0.01))
-        seed: int = int(form.get("seed", 42))
-        window: int = int(form.get("window", 2000))
-        L: int = int(form.get("L", -1))
-        coverage: float = float(form.get("coverage", 0.95))
-        min_abs_corr: float = float(form.get("min_abs_corr", 0.5))
-        batch_size: int = int(form.get("batch_size", 5))
-        sample_size: int = int(form.get("sample_size", 10000))
+        file_id_param: str | None = gwas_file if not is_uploaded else None
 
         gwas_entry = None
-        file_id_param: str | None = form.get("gwas_file") if not is_uploaded else None
-
         if not is_uploaded and file_id_param and gwas_library:
             gwas_entry = gwas_library.get_gwas_entry(file_id=file_id_param)
 
-        phenotype: str | None = form.get("phenotype")
         if not phenotype and gwas_entry:
             phenotype = gwas_entry.get("description") or gwas_entry.get("phenotype_code")
-            # Clean up leading '#' if it exists in the library description
             if isinstance(phenotype, str) and phenotype.startswith("#"):
                 phenotype = phenotype.lstrip("#").strip()
 
-        raw_ref_genome = form.get("ref_genome")
-        ref_genome: str = raw_ref_genome or "GRCh37"
+        raw_ref_genome = ref_genome
+        ref_genome = raw_ref_genome or "GRCh37"
 
         if gwas_entry and (not raw_ref_genome or raw_ref_genome == "GRCh37"):
             inferred_build = gwas_entry.get("genome_build")
@@ -250,7 +245,7 @@ async def post_analysis_pipeline(
         if not phenotype:
             raise HTTPException(status_code=400, detail="phenotype is required (could not be inferred from library)")
 
-        if is_uploaded and gwas_file and not allowed_file(gwas_file.filename):
+        if is_uploaded and gwas_file_upload and not allowed_file(gwas_file_upload.filename):
             raise HTTPException(
                 status_code=400,
                 detail="Invalid file format. Supported: .tsv, .txt, .csv, .gz, .bgz",
@@ -315,7 +310,6 @@ async def post_analysis_pipeline(
         _gwas_library_id: str | None = None
 
         if not is_uploaded:
-            file_id_param: str | None = form.get("gwas_file")
             if not file_id_param:
                 raise HTTPException(
                     status_code=400,
@@ -421,22 +415,22 @@ async def post_analysis_pipeline(
 
         else:
             # Uploaded file
-            if not gwas_file or gwas_file.filename == "":
+            if not gwas_file_upload or gwas_file_upload.filename == "":
                 raise HTTPException(status_code=400, detail="No GWAS file uploaded")
-            if not allowed_file(gwas_file.filename):
+            if not allowed_file(gwas_file_upload.filename):
                 raise HTTPException(
                     status_code=400,
                     detail="Invalid file format. Supported: .tsv, .txt, .csv, .gz, .bgz",
                 )
 
-            original_filename = gwas_file.filename
-            filename = secure_filename(gwas_file.filename)
+            original_filename = gwas_file_upload.filename
+            filename = secure_filename(gwas_file_upload.filename)
             file_id_new = str(uuid.uuid4())
             temp_dir = get_shared_temp_dir(user_id=current_user_id, prefix="upload")
             temp_file_path = os.path.join(temp_dir, filename)
 
             with open(temp_file_path, "wb") as fh:
-                while chunk := await gwas_file.read(1024 * 1024):
+                while chunk := await gwas_file_upload.read(1024 * 1024):
                     fh.write(chunk)
 
             file_size = os.path.getsize(temp_file_path)

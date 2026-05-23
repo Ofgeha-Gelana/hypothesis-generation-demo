@@ -38,8 +38,8 @@ services:
       dockerfile: docker/Dockerfile
     hostname: dask-scheduler
     ports:
-      - "8786:8786" 
-      - "8787:8787" 
+      - "8786:8786"
+      - "18787:8787" 
     environment:
       - PYTHONPATH=/app
       - SKIP_SEED=true 
@@ -74,12 +74,15 @@ services:
       - SKIP_SEED=true
       - REDIS_URL=redis://redis:6379
       - OPENAI_API_KEY=${OpenAI}
+      - HARMONIZER_REF_DIR_37=/app/data/harmonizer_ref/b38
+      - HARMONIZER_REF_DIR_38=/app/data/harmonizer_ref/b38
     env_file:
       - ../.env
     volumes:
       - ..:/app
       - ../data:/app/data
       - /mnt/hdd_1/rediet/hypothesis-generation-demo/data:/app/data/external_data
+      - /mnt/hdd_1/hypothesis/hypothesis-generation-demo/data/harmonizer_ref:/app/data/harmonizer_ref
     depends_on:
       dask-scheduler:
         condition: service_healthy  
@@ -97,11 +100,11 @@ services:
       --preload src.dask_preload
     deploy:
       mode: replicated
-      replicas: 1  
+      replicas: 1
       resources:
         limits:
-          cpus: '64.0'   
-          memory: 180G    
+          cpus: '28.0'
+          memory: 180G
     networks:
       - app_network
     restart: unless-stopped
@@ -215,6 +218,7 @@ services:
       - ..:/app
       - ../data:/app/data
       - /mnt/hdd_1/rediet/hypothesis-generation-demo/data:/app/data/external_data
+      - /mnt/hdd_1/hypothesis/hypothesis-generation-demo/data/harmonizer_ref:/app/data/harmonizer_ref
     env_file:
       - ../.env
     command: >
@@ -261,7 +265,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6399:6379"
+      - "6400:6379"
     networks:
       - app_network
     healthcheck:
